@@ -17,11 +17,13 @@ app = FastAPI()
 def read_root():
     return {"Hello": "World"}
 
-'''
+
 @app.get("/items")
 def ret_count():
-    return {"count_doc": records.count_documents({})}
-'''
+    #stats = json.loads(json.dumps(db.command("collstats", "data")))
+    stats = db.command("collstats", "data")
+    return {"count_doc": stats['count']}
+
 
 @app.get("/items/{item_id}")
 def read_item(item_id: int, q: str = None):
