@@ -24,6 +24,9 @@ def ret_count():
     stats = db.command("collstats", "data")
     return {"count_doc": stats['count']}
 
+@app.get("/count")
+def ret_count():
+	return {"count_147": db.obd.count_documents({"f8":{"$regexp":'147'}})}
 
 @app.get("/items/{item_id}")
 def read_item(item_id: int, q: str = None):
