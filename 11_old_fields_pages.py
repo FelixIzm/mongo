@@ -7,8 +7,6 @@ import argparse
 from bs4 import BeautifulSoup
 import pymongo
 from pymongo import MongoClient
-import multiprocessing
-import time
 
 
 with open('dictionary.json') as f:
@@ -20,10 +18,7 @@ print(js['ip'],js['port'],js['db_name'])
 mydb = myclient[js['db_name']]
 _set = mydb['settings']
 _req = mydb['requests']
-_pgs = mydb['pages']
 
-# Книга памят
-# https://obd-memorial.ru/html/getimageinfo?id=409663384&_=1679122575655
 
 #url3='lp=T~923 сп&entity=000000011111110&entities=7003,8001,6006,6007,30,24,28,27,23,34,22,20,21'
 url3=js['url3']+'&ps=200'
@@ -77,15 +72,7 @@ def excepthook(type, value, traceback):
     print(traceback)
 
 
-#sys.excepthook = excepthook
-
-def split_list(a_list):
-    half = len(a_list)//2
-    return a_list[:half], a_list[half:]
-
-def split(a, n):
-    k, m = divmod(len(a), n)
-    return (a[i * k + min(i, m):(i + 1) * k + min(i + 1, m)] for i in range(n))
+sys.excepthook = excepthook
 
 def main():
     global JSESSIONID_value, secret_cookie,secret_cookie_value, countPages, headers, cookies, url2,url3
@@ -145,11 +132,7 @@ def main():
                 raise ValueError('Не определилось число страниц!')
 
             _set.insert_one({'headers':headers, 'cookies':cookies, 'countPages':countPages})
-            # Для обработки страниц по 200 записей - записываем в коллекцию
-            # это позволит возобновить обработку с прерванного места
-            _r = [*range(1, int(countPages)+1)]
-            for rec in _r:
-                _pgs.insert_one({'id':str(rec),'processed':False})
+
         else:
             print('else+++')
             raise ValueError('JSESSIONID not')
@@ -158,11 +141,11 @@ def main():
 
 
 
-def get_page(page):
+async def get_page(page):
     global cookies,headers
     ids={}
     print("get_page = ", page)
-    if(page==1):
+    if(page==0):
         URL_search =url1+url2+url3
         #cookies[secret_cookie]=secret_cookie_value
         #cookies['request']=urllib.parse.quote(url3)
@@ -184,8 +167,7 @@ def get_page(page):
                 ids[res['id']]=res.find('div', {"class":"search-result__col-pos-and-icon"}).find('img')['title']
             return ids
     else:
-        URL_search =url1+url2+url3 +'&p='+str(int(page))
-        #print(URL_search)
+        URL_search =url1+url2+url3 +'&p='+str(page+1)
         #cookies[secret_cookie]=secret_cookie_value
         #cookies['request']=urllib.parse.quote(url3)
         #cookies['JSESSIONID'] = JSESSIONID_value
@@ -204,14 +186,18 @@ def get_page(page):
                 ids[res['id']]=res.find('div', {"class":"search-result__col-pos-and-icon"}).find('img')['title']
             return ids
 
-def get_list_info(list_ids):
-    for id in list_ids:
-        result = get_page(id)
+
+async def fxMain():
+    global countPages #, insertedPages
+    print('countPages = {}'.format(countPages))
+
+    futures = [get_page(i) for i in range(0, int(countPages))]
+    for i, future in enumerate(futures):
+        result = await future
+        #print(i)
         for key, value in result.items():
+            #print('insert into search_ids(id,doc,flag) values ('+key+','+value+',0)')
             _req.insert_one({'id':key,'doc':value})
-        _pgs.update_one({'id':id},{'$set':{'processed':'yes'}})
-        
-    print('{} записей'.format(len(list_ids)))
 
 
 if __name__ == '__main__':
@@ -225,53 +211,15 @@ if __name__ == '__main__':
         _set = mydb['settings']
         if _set.drop():
             _set = mydb['settings']
-
-        _pgs = mydb['pages']
-        if _pgs.drop():
-            _pgs = mydb['pages']
-
         main()
     else:
         _sets = _set.find()
         headers = _sets[0]['headers']
         cookies = _sets[0]['cookies']
-        totalPages = int(_sets[0]['countPages'])
-
-        #print(len(list(count_pages)))
-        #countPages = int(int(_req.count_documents({"id": { "$exists": True }}))/200)
-        countNoProcessedPages = _pgs.count_documents({"processed": False })
-
-        Id_NoProcessed_Pages = list(_pgs.find({'processed':False}, {'id': 1,'_id': False}))
-
-        print("totalPages = ",totalPages,"noProcessedPages = ",countNoProcessedPages)
-
-#        restPages = totalPages-countNoProcessedPages
-#        print("restPages = ",restPages)
-#        if(restPages<totalPages):
-#            _r = range(restPages+1, totalPages+1)
-#        elif(restPages==totalPages):
-#            _r = range(1, totalPages+1)
-#        else:
-#            exit(1)
-#        ids = [str(_pages) for _pages in _r]
-
-        ids = [_pages['id'] for _pages in Id_NoProcessed_Pages]
-        # Кол-во ядер  процессора
-        thrnum = 4
-        # делим массив
-        asd= list(split(ids,thrnum))
-
-        parms = []
-        for i in asd:
-            parms.append(i)
-
-        multiprocessing.freeze_support()
-        pool = multiprocessing.Pool( processes = thrnum, )
-        clc = time.time()
-        pool.map( get_list_info, parms )
-        clc = time.time() - clc
-        print( "время {0:.2f} секунд".format( clc ) )
-
-        exit(1)
+        countPages = _sets[0]['countPages']
+        #print(headers)
+        #print(cookies)
 
 
+loop.run_until_complete(fxMain())
+loop.close()
